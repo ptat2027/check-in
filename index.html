@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>QR Camera Scanner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 18px;
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      color: #212529;
+    }
+    .card {
+      max-width: 520px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 18px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,.10);
+    }
+    h2 { margin-top: 0; text-align: center; }
+    #reader { width: 100%; }
+    #status {
+      display: none;
+      margin-top: 12px;
+      padding: 11px;
+      border-radius: 8px;
+      line-height: 1.45;
+    }
+    .info {
+      display: block !important;
+      background: #e7f3ff; color: #084298; border: 1px solid #b6d4fe;
+    }
+    .success {
+      display: block !important;
+      background: #d4edda; color: #155724; border: 1px solid #c3e6cb;
+    }
+    .error {
+      display: block !important;
+      background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>สแกน QR Code</h2>
+    <div id="reader"></div>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const returnUrl = params.get("returnUrl");
+
+    let scanner = null;
+    let completed = false;
+
+    function showStatus(message, type) {
+      const el = document.getElementById("status");
+      el.textContent = message;
+      el.className = type;
+    }
+
+    function validReturnUrl(value) {
+      if (!value) return false;
+
+      try {
+        const u = new URL(value);
+        return (
+          u.protocol === "https:" &&
+          (u.hostname === "script.google.com" || u.hostname.endsWith(".script.google.com"))
+        );
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function cameraErrorText(error) {
+      const name = error && error.name ? error.name : "";
+      const msg = error && error.message ? error.message : String(error || "");
+
+      if (name === "NotAllowedError" || /permission denied|notallowederror/i.test(msg)) {
+        return "ไม่ได้รับสิทธิ์ใช้กล้อง กรุณาอนุญาต Camera สำหรับเว็บไซต์นี้แล้วโหลดหน้าใหม่";
+      }
+
+      if (name === "NotFoundError" || /camera not found|no camera/i.test(msg)) {
+        return "ไม่พบกล้องบนอุปกรณ์นี้";
+      }
+
+      return "ไม่สามารถเปิดกล้องได้: " + (msg || "Unknown error");
+    }
+
+    async function stopScanner() {
+      if (!scanner) return;
+      try { await scanner.stop(); } catch (_) {}
+      try { await scanner.clear(); } catch (_) {}
+    }
+
+    async function onScanSuccess(decodedText) {
+      if (completed) return;
+      completed = true;
+
+      const value = String(decodedText || "").trim();
+
+      if (!value) {
+        completed = false;
+        return;
+      }
+
+      if (!validReturnUrl(returnUrl)) {
+        showStatus("ไม่พบ URL สำหรับกลับไปยังระบบเช็คอิน กรุณาตรวจสอบ APP_URL", "error");
+        completed = false;
+        return;
+      }
+
+      showStatus("อ่าน QR Code สำเร็จ กำลังกลับไปยังระบบเช็คอิน...", "success");
+
+      await stopScanner();
+
+      // FIX: redirect instead of using window.opener/postMessage.
+      // This works even when the browser sets window.opener = null.
+      const destination = new URL(returnUrl);
+      destination.searchParams.set("scan", value);
+
+      window.location.replace(destination.toString());
+    }
+
+    async function startScanner() {
+      if (!window.isSecureContext) {
+        showStatus("Camera access requires HTTPS.", "error");
+        return;
+      }
+
+      if (!validReturnUrl(returnUrl)) {
+        showStatus("ค่า returnUrl ไม่ถูกต้อง กรุณาเปิด scanner จากหน้าเช็คอินใหม่", "error");
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showStatus("เบราว์เซอร์นี้ไม่รองรับ camera API กรุณาใช้ Chrome หรือ Safari รุ่นปัจจุบัน", "error");
+        return;
+      }
+
+      try {
+        scanner = new Html5Qrcode("reader");
+
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          onScanSuccess,
+          function() {}
+        );
+
+        showStatus("พร้อมสแกน QR Code", "info");
+      } catch (error) {
+        showStatus(cameraErrorText(error), "error");
+      }
+    }
+
+    window.addEventListener("load", startScanner);
+    window.addEventListener("beforeunload", stopScanner);
+  </script>
+</body>
+</html>
